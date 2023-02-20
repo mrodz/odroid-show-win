@@ -3,13 +3,10 @@ mod usb;
 use usb::USBInterface;
 
 fn main() {
-    let mut x = USBInterface::new().unwrap();
+    let x = USBInterface::new().unwrap();
 
     println!("$ Demo running {}\n", USBInterface::libusb_version_string());
 
-    let devices = x.devices().unwrap();
-
-    for device in devices {
-        println!("{}", device);
-    }
+    let show2 = x.open_device(60000, 4292).unwrap();
+    show2.debug_verbose();
 }

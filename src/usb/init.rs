@@ -21,7 +21,7 @@ pub(super) fn init() -> Result<(), i32> {
 
 /// Get devices as a C-style array of type [`LibusbDevice`].
 /// Returns said array and its length.
-fn get_libusb_devices() -> (*const LibusbDevice, isize) {
+pub(super) fn get_libusb_devices() -> (*const LibusbDevice, isize) {
     let mut devices = ffi_ptr_const::<*mut libusb_device>();
     let devices_size: isize = unsafe { libusb_get_device_list(std::ptr::null_mut(), &mut devices) };
 
@@ -29,7 +29,7 @@ fn get_libusb_devices() -> (*const LibusbDevice, isize) {
 }
 
 /// Get the descriptor of a device, or return the error code if it fails.
-fn get_descriptor(device: LibusbDevice) -> Result<*mut libusb_device_descriptor, i32> {
+pub(super) fn get_descriptor(device: LibusbDevice) -> Result<*mut libusb_device_descriptor, i32> {
     // Use allocator to reserve space for the device descriptor.
     let descriptor_layout = Layout::new::<libusb_device_descriptor>();
     // Must be cleaned up in super::USBInterface when dropped.
@@ -45,7 +45,7 @@ fn get_descriptor(device: LibusbDevice) -> Result<*mut libusb_device_descriptor,
     }
 }
 
-fn get_handle(
+pub(super) fn get_handle(
     device: LibusbDevice,
     descriptor: *mut libusb_device_descriptor,
 ) -> Result<*mut libusb_device_handle, i32> {
@@ -116,15 +116,16 @@ pub fn descriptor_to_string(
     }
 }
 
-/// Get devices as a vector of [`Device`]s.
+/// Get opened devices as a vector of [`Device`]s.
 ///
 /// Also returns a pointer to the underlying C-Style array [`LibusbDevice`]s,
 /// in order to be cleaned up at a later date.
 ///
 /// Will return an error code if any step fails.
-pub fn get_devices() -> Result<(Vec<Device>, *const *mut libusb_device), i32> {
-    let (devices, devices_size) = get_libusb_devices();
-
+pub fn get_devices(
+    devices: *const *mut libusb_device,
+    devices_size: isize,
+) -> Result<(Vec<Device>, *const *mut libusb_device), i32> {
     let mut result: Vec<Device> = Vec::with_capacity(devices_size.try_into().unwrap());
 
     for i in 0..devices_size {
@@ -133,6 +134,8 @@ pub fn get_devices() -> Result<(Vec<Device>, *const *mut libusb_device), i32> {
         let Ok((descriptor, handle)) = open_usb(device) else {
 			continue // this "device" is useless to us. 
 		};
+
+        unsafe { libusb_set_auto_detach_kernel_driver(handle, 1) };
 
         result.push(Device::new(descriptor, handle, device));
     }
