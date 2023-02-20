@@ -1,10 +1,6 @@
-use usb::USBInterface;
-
 mod usb;
 
-
-// extern crate libusb1_sys as ffi;
-// use ffi::libusb_device;
+use usb::USBInterface;
 
 fn main() {
     let mut x = USBInterface::new().unwrap();
@@ -16,5 +12,4 @@ fn main() {
     for device in devices {
         println!("{}", device);
     }
-
 }

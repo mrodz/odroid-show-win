@@ -1,15 +1,15 @@
-use std::alloc::{Layout, alloc};
-
-use libusb1_sys::{
-    libusb_device, libusb_device_descriptor, libusb_device_handle, libusb_get_device_descriptor,
-    libusb_get_device_list, libusb_get_string_descriptor_ascii, libusb_init, libusb_open,
-};
-
 use super::{ffi_ptr_const, ffi_ptr_mut, Device};
+use libusb1_sys::*;
+use std::alloc::{alloc, Layout};
 
+/// Alias for convenience.
 type LibusbDevice = *mut libusb_device;
-const STRING_BUF_LEN: usize = 255;
 
+/// The maximum length alloted for string description reads.
+pub const STRING_BUF_LEN: usize = 255;
+
+/// Wrapper for [`libusb_init`].
+/// Returns the error code if this step fails.
 pub(super) fn init() -> Result<(), i32> {
     let code = unsafe { libusb_init(std::ptr::null_mut()) };
     if code < 0 {
@@ -19,6 +19,8 @@ pub(super) fn init() -> Result<(), i32> {
     }
 }
 
+/// Get devices as a C-style array of type [`LibusbDevice`].
+/// Returns said array and its length.
 fn get_libusb_devices() -> (*const LibusbDevice, isize) {
     let mut devices = ffi_ptr_const::<*mut libusb_device>();
     let devices_size: isize = unsafe { libusb_get_device_list(std::ptr::null_mut(), &mut devices) };
@@ -26,8 +28,11 @@ fn get_libusb_devices() -> (*const LibusbDevice, isize) {
     (devices, devices_size)
 }
 
+/// Get the descriptor of a device, or return the error code if it fails.
 fn get_descriptor(device: LibusbDevice) -> Result<*mut libusb_device_descriptor, i32> {
+    // Use allocator to reserve space for the device descriptor.
     let descriptor_layout = Layout::new::<libusb_device_descriptor>();
+    // Must be cleaned up in super::USBInterface when dropped.
     let descriptor = unsafe { alloc(descriptor_layout) } as *mut libusb_device_descriptor;
 
     let code = unsafe { libusb_get_device_descriptor(device, descriptor) };
@@ -44,7 +49,7 @@ fn get_handle(
     device: LibusbDevice,
     descriptor: *mut libusb_device_descriptor,
 ) -> Result<*mut libusb_device_handle, i32> {
-	assert!(!descriptor.is_null());
+    assert!(!descriptor.is_null());
 
     let mut handle = ffi_ptr_mut::<libusb_device_handle>();
     let code = unsafe { libusb_open(device, &mut handle) };
@@ -56,6 +61,10 @@ fn get_handle(
     }
 }
 
+/// Open a USB device.
+///
+/// Will yield its descriptor and a handle to the device,
+/// or an error code if this step fails.
 fn open_usb(
     device: LibusbDevice,
 ) -> Result<(*mut libusb_device_descriptor, *mut libusb_device_handle), i32> {
@@ -65,22 +74,34 @@ fn open_usb(
     Ok((descriptor, handle))
 }
 
-pub fn descriptor_to_string_check(handle: *mut libusb_device_handle, descriptor_field: u8) -> Option<String> {
-	if descriptor_field == 0 {
-		return None
-	}
+/// Stringify a descriptor field.
+/// If the field does not exist or the descriptor cannot find the string, returns `None`.
+///
+/// Simplifies [`descriptor_to_string`]
+pub fn descriptor_to_string_check(
+    handle: *mut libusb_device_handle,
+    descriptor_field: u8,
+) -> Option<String> {
+    if descriptor_field == 0 {
+        return None;
+    }
 
-	if let Ok(result) = descriptor_to_string(handle, descriptor_field) {
-		Some(result)
-	} else {
-		None
-	}
+    if let Ok(result) = descriptor_to_string(handle, descriptor_field) {
+        Some(result)
+    } else {
+        None
+    }
 }
 
+/// Stringify a descriptor field.
+///
+/// Returns the string, if successful, or an error code.
 pub fn descriptor_to_string(
     handle: *mut libusb_device_handle,
     descriptor_field: u8,
 ) -> Result<String, i32> {
+    assert!(descriptor_field != 0);
+
     let mut raw_bytes = [0_u8; STRING_BUF_LEN];
     let size: i32 = std::mem::size_of_val(&raw_bytes).try_into().unwrap();
 
@@ -95,6 +116,12 @@ pub fn descriptor_to_string(
     }
 }
 
+/// Get devices as a vector of [`Device`]s.
+///
+/// Also returns a pointer to the underlying C-Style array [`LibusbDevice`]s,
+/// in order to be cleaned up at a later date.
+///
+/// Will return an error code if any step fails.
 pub fn get_devices() -> Result<(Vec<Device>, *const *mut libusb_device), i32> {
     let (devices, devices_size) = get_libusb_devices();
 
@@ -104,7 +131,7 @@ pub fn get_devices() -> Result<(Vec<Device>, *const *mut libusb_device), i32> {
         let device: LibusbDevice = unsafe { *devices.offset(i) };
 
         let Ok((descriptor, handle)) = open_usb(device) else {
-			continue;
+			continue // this "device" is useless to us. 
 		};
 
         result.push(Device::new(descriptor, handle, device));
