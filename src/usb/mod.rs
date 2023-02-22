@@ -5,6 +5,8 @@ mod init;
 extern crate libc;
 extern crate libusb1_sys as ffi;
 
+pub use std::result::Result::Ok as StdOk;
+use anyhow::{Result, bail, Ok};
 use ffi::constants::{LIBUSB_SUCCESS, LIBUSB_ERROR_NOT_FOUND};
 use ffi::*;
 use std::alloc::{dealloc, Layout};
@@ -72,8 +74,10 @@ impl Device {
         }
     }
 
-    pub fn read(&self) {
-        comms::read(&self, 0);
+    pub fn read(&self) -> Result<()> {
+        comms::read(&self, 0)?;
+
+        Ok(())
     }
 
     /// You can only trust this struct's fields if this call returns true.
@@ -146,7 +150,7 @@ impl USBInterface {
     /// Create a new `USBInterface`.
     /// Will construct the interface or return an error code if initialization fails.
     /// # Caution: constructing multiple instances is undefined behavior.
-    pub fn new() -> Result<Self, i32> {
+    pub fn new() -> Result<Self> {
         init::init()?;
         let (devices, devices_len) = init::get_libusb_devices();
 
@@ -172,7 +176,7 @@ impl USBInterface {
     /// Return a vector of accessible devices, or an error code if this fails.
     /// Will also store a clone of the devices pointer to be freed (using [`libusb_free_device_list`])
     /// on drop.
-    pub fn open_all_devices(&mut self) -> Result<Vec<Device>, i32> {
+    pub fn open_all_devices(&mut self) -> Result<Vec<Device>> {
         assert!(self.initialized);
 
         let (devices, ptr) = init::get_devices(self.devices_ptr, self.devices_len)?;
@@ -183,7 +187,7 @@ impl USBInterface {
         Ok(devices)
     }
 
-    pub fn open_device(&self, product_id: u16, vendor_id: u16) -> Result<Device, i32> {
+    pub fn open_device(&self, product_id: u16, vendor_id: u16) -> Result<Device> {
         assert!(self.initialized);
 
         for i in 0..self.devices_len {
@@ -197,12 +201,14 @@ impl USBInterface {
 
                     libusb_set_auto_detach_kernel_driver(handle, 1);
 
+                    dbg!(handle);
+
                     return Ok(Device::new(descriptor, handle, device));
                 }
             }
         }
 
-        Err(LIBUSB_ERROR_NOT_FOUND)
+        bail!(LIBUSB_ERROR_NOT_FOUND)
     }
 }
 

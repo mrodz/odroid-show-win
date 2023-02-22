@@ -1,5 +1,6 @@
-use super::{ffi_ptr_const, ffi_ptr_mut, Device};
+use super::{ffi_ptr_const, ffi_ptr_mut, Device, StdOk};
 use libusb1_sys::*;
+use anyhow::{Result, Ok, bail};
 use std::alloc::{alloc, Layout};
 
 /// Alias for convenience.
@@ -10,10 +11,10 @@ pub const STRING_BUF_LEN: usize = 255;
 
 /// Wrapper for [`libusb_init`].
 /// Returns the error code if this step fails.
-pub(super) fn init() -> Result<(), i32> {
+pub(super) fn init() -> Result<()> {
     let code = unsafe { libusb_init(std::ptr::null_mut()) };
     if code < 0 {
-        Err(code)
+        bail!(code);
     } else {
         Ok(())
     }
@@ -29,7 +30,7 @@ pub(super) fn get_libusb_devices() -> (*const LibusbDevice, isize) {
 }
 
 /// Get the descriptor of a device, or return the error code if it fails.
-pub(super) fn get_descriptor(device: LibusbDevice) -> Result<*mut libusb_device_descriptor, i32> {
+pub(super) fn get_descriptor(device: LibusbDevice) -> Result<*mut libusb_device_descriptor> {
     // Use allocator to reserve space for the device descriptor.
     let descriptor_layout = Layout::new::<libusb_device_descriptor>();
     // Must be cleaned up in super::USBInterface when dropped.
@@ -38,7 +39,7 @@ pub(super) fn get_descriptor(device: LibusbDevice) -> Result<*mut libusb_device_
     let code = unsafe { libusb_get_device_descriptor(device, descriptor) };
 
     if code < 0 {
-        Err(code)
+        bail!(code)
     } else {
         let result = Ok(descriptor);
         result
@@ -48,14 +49,14 @@ pub(super) fn get_descriptor(device: LibusbDevice) -> Result<*mut libusb_device_
 pub(super) fn get_handle(
     device: LibusbDevice,
     descriptor: *mut libusb_device_descriptor,
-) -> Result<*mut libusb_device_handle, i32> {
+) -> Result<*mut libusb_device_handle> {
     assert!(!descriptor.is_null());
 
     let mut handle = ffi_ptr_mut::<libusb_device_handle>();
     let code = unsafe { libusb_open(device, &mut handle) };
 
     if code < 0 {
-        Err(code)
+        bail!(code)
     } else {
         Ok(handle)
     }
@@ -67,10 +68,9 @@ pub(super) fn get_handle(
 /// or an error code if this step fails.
 fn open_usb(
     device: LibusbDevice,
-) -> Result<(*mut libusb_device_descriptor, *mut libusb_device_handle), i32> {
+) -> Result<(*mut libusb_device_descriptor, *mut libusb_device_handle)> {
     let descriptor = get_descriptor(device)?;
     let handle = get_handle(device, descriptor)?;
-
     Ok((descriptor, handle))
 }
 
@@ -86,7 +86,7 @@ pub fn descriptor_to_string_check(
         return None;
     }
 
-    if let Ok(result) = descriptor_to_string(handle, descriptor_field) {
+    if let StdOk(result) = descriptor_to_string(handle, descriptor_field) {
         Some(result)
     } else {
         None
@@ -99,7 +99,7 @@ pub fn descriptor_to_string_check(
 pub fn descriptor_to_string(
     handle: *mut libusb_device_handle,
     descriptor_field: u8,
-) -> Result<String, i32> {
+) -> Result<String> {
     assert!(descriptor_field != 0);
 
     let mut raw_bytes = [0_u8; STRING_BUF_LEN];
@@ -110,7 +110,7 @@ pub fn descriptor_to_string(
     };
 
     if code < 0 {
-        Err(code)
+        bail!(code)
     } else {
         Ok(unsafe { String::from_utf8_unchecked(raw_bytes.to_vec()) })
     }
@@ -125,15 +125,18 @@ pub fn descriptor_to_string(
 pub fn get_devices(
     devices: *const *mut libusb_device,
     devices_size: isize,
-) -> Result<(Vec<Device>, *const *mut libusb_device), i32> {
+) -> Result<(Vec<Device>, *const *mut libusb_device)> {
     let mut result: Vec<Device> = Vec::with_capacity(devices_size.try_into().unwrap());
 
     for i in 0..devices_size {
         let device: LibusbDevice = unsafe { *devices.offset(i) };
 
-        let Ok((descriptor, handle)) = open_usb(device) else {
-			continue // this "device" is useless to us. 
-		};
+        let StdOk((descriptor, handle)) = open_usb(device) else {
+            continue;
+        };
+        // let Ok((descriptor, handle)) = open_usb(device) else {
+			// continue // this "device" is useless to us. 
+		// };
 
         unsafe { libusb_set_auto_detach_kernel_driver(handle, 1) };
 
